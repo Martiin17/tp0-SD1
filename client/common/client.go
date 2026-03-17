@@ -59,12 +59,6 @@ func (c *Client) StartClientLoop() {
 		// Create the connection the server in every loop iteration. Send an
 		err := c.createClientSocket()
 		if err != nil {
-			log.Errorf(
-				"action: connect | result: retry | client_id: %v",
-				c.config.ID,
-			)
-
-			// Esperás y pasás a la siguiente iteración
 			time.Sleep(c.config.LoopPeriod)
 			continue
 		}
