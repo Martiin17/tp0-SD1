@@ -42,6 +42,8 @@ def generate_yaml(output_file, n_clients):
 
     networks_config = {
         'testing_net': {
+            'name': 'tp0_testing_net', 
+            'driver': 'bridge', 
             'ipam': {
                 'driver': 'default',
                 'config': [{'subnet': '172.25.125.0/24'}]
