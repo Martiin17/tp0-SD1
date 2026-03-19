@@ -10,7 +10,6 @@ def get_clients_config(n_clients):
             'entrypoint': '/client',
             'environment': [
                 f'CLI_ID={i}',
-                'CLI_LOG_LEVEL=DEBUG',
                 'CLI_SERVER_ADDRESS=server:12345',
             ],
             'networks': [
@@ -32,7 +31,6 @@ def generate_yaml(output_file, n_clients):
         'entrypoint': 'python3 /main.py',
         'environment': [
             'PYTHONUNBUFFERED=1',
-            'LOGGING_LEVEL=DEBUG',
         ],
         'networks': [
             'testing_net'
