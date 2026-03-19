@@ -3,14 +3,15 @@
 MSG="hellow"
 SERVER_NAME="server"
 PORT=12345
-NETWORK="tp0_testing_net"
-SUCCESS=false
+NETWORK="tp0_testing_net" 
+SUCCESS="false"
 
-for i in {1..3}; do
-    ACTUAL_RESPONSE=$(echo "$MSG" | docker run --rm -i --network "$NETWORK" busybox nc -w 2 "$SERVER_NAME" "$PORT" 2>/dev/null)
 
-    if [ "$ACTUAL_RESPONSE" == "$MSG" ]; then
-        SUCCESS=true
+for i in $(seq 1 3); do
+    ACTUAL_RESPONSE=$(echo "$MSG" | docker run --rm -i --network "$NETWORK" busybox nc -w 2 "$SERVER_NAME" "$PORT" 2>/dev/null | tr -d '\r\n')
+
+    if [ "$ACTUAL_RESPONSE" = "$MSG" ]; then
+        SUCCESS="true"
         break
     fi
     
@@ -19,7 +20,7 @@ for i in {1..3}; do
     fi
 done
 
-if [ "$SUCCESS" = true ]; then
+if [ "$SUCCESS" = "true" ]; then
     echo "action: test_echo_server | result: success"
     exit 0
 else
