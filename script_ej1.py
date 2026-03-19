@@ -18,6 +18,9 @@ def get_clients_config(n_clients):
             ],
             'depends_on': [
                 'server'
+            ],
+            'volumes':[
+                './client/config.yaml:/config.yaml:ro'
             ]
         }
     return result
@@ -31,8 +34,13 @@ def generate_yaml(output_file, n_clients):
             'PYTHONUNBUFFERED=1',
             'LOGGING_LEVEL=DEBUG',
         ],
-        'networks': ['testing_net']
-    }
+        'networks': [
+            'testing_net'
+        ],
+        'volumes':[
+            './server/config.ini:/config.ini:ro'
+        ]
+}
 
     networks_config = {
         'testing_net': {
