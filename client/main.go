@@ -5,7 +5,9 @@ import (
 	"os"
 	"strings"
 	"time"
-
+	"os/signal"
+	"syscall"
+	
 	"github.com/op/go-logging"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -103,6 +105,9 @@ func main() {
 	// Print program config with debugging purposes
 	PrintConfig(v)
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+
 	clientConfig := common.ClientConfig{
 		ServerAddress: v.GetString("server.address"),
 		ID:            v.GetString("id"),
@@ -110,6 +115,6 @@ func main() {
 		LoopPeriod:    v.GetDuration("loop.period"),
 	}
 
-	client := common.NewClient(clientConfig)
+	client := common.NewClient(clientConfig, sigs)
 	client.StartClientLoop()
 }

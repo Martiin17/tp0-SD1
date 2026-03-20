@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/op/go-logging"
@@ -23,13 +24,15 @@ type ClientConfig struct {
 type Client struct {
 	config ClientConfig
 	conn   net.Conn
+	stop   chan os.Signal
 }
 
 // NewClient Initializes a new client receiving the configuration
 // as a parameter
-func NewClient(config ClientConfig) *Client {
+func NewClient(config ClientConfig, stop chan os.Signal) *Client {
 	client := &Client{
 		config: config,
+		stop:   stop,
 	}
 	return client
 }
@@ -51,7 +54,14 @@ func (c *Client) StartClientLoop() {
 	// There is an autoincremental msgID to identify every message sent
 	// Messages if the message amount threshold has not been surpassed
 	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-		// Create the connection the server in every loop iteration. Send an
+		
+		select {
+			case <-c.stop:
+				c.handleShutdown()
+				return
+			default:
+		}
+
 		err := c.createClientSocket()
 		if err != nil {
 			log.Errorf(
@@ -59,8 +69,14 @@ func (c *Client) StartClientLoop() {
 				c.config.ID,
 			)
 
-			time.Sleep(c.config.LoopPeriod)
-			continue
+			select {
+			case <-time.After(c.config.LoopPeriod):
+				msgID--
+				continue
+			case <-c.stop:
+				c.handleShutdown()
+				return
+			}
 		}
 
 		// TODO: Modify the send to avoid short-write
@@ -86,9 +102,18 @@ func (c *Client) StartClientLoop() {
 			msg,
 		)
 
-		// Wait a time between sending one message and the next one
-		time.Sleep(c.config.LoopPeriod)
-
+		select {
+			case <-time.After(c.config.LoopPeriod):
+			case <-c.stop:
+				c.handleShutdown()
+				return
+		}
 	}
+
 	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+}
+
+func (c *Client) handleShutdown() {
+	log.Infof("action: shutdown | result: in_progress | client_id: %v | resource: main_loop", c.config.ID)
+	log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
 }
