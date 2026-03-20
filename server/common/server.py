@@ -33,7 +33,7 @@ class Server:
                     self.__handle_client_connection(client_sock)
             except OSError:
                 if not self.running:
-                    logging.info('action: accept_connections | result: interrupted_by_shutdown')
+                    logging.info('action: accept_connections | result: success')
                 else:
                     logging.error('action: accept_connections | result: fail | error: socket_closed')
                 break
