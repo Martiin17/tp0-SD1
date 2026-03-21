@@ -23,7 +23,9 @@ type ClientConfig struct {
 	ID            string
 	ServerAddress string
 	LoopPeriod    time.Duration
-	Bet           BetData
+	Bet           BetData  
+	BatchMaxAmount int
+	DataFilePath  string
 }
 
 type Client struct {
@@ -63,7 +65,7 @@ func (c *Client) StartClientLoop() {
 	default:
 	}
 
-    for {
+	for {
 		err := c.createClientSocket()
 		if err == nil {
 			break
@@ -82,23 +84,94 @@ func (c *Client) StartClientLoop() {
 
 	defer c.conn.Close()
 
-	bet := c.config.Bet
-	if err := SendBet(c.conn, c.config.ID,
-		bet.FirstName, bet.LastName, bet.Document, bet.Birthdate, bet.Number); err != nil {
-		log.Errorf("action: send_bet | result: fail | client_id: %v | error: %v",
-			c.config.ID, err)
-		return
-	}
-
-	document, number, err := RecvAck(c.conn)
+	file, err := os.Open(c.config.DataFilePath)
 	if err != nil {
-		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+		log.Errorf("action: open_file | result: fail | client_id: %v | error: %v",
 			c.config.ID, err)
 		return
 	}
+	defer file.Close()
 
-	log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v",
-		document, number)
+	reader := csv.NewReader(file)
+	batchSize := c.config.BatchMaxAmount
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+
+	for {
+		select {
+		case <-c.stop:
+			c.handleShutdown()
+			return
+		default:
+		}
+
+		batch, done, err := readBatch(reader, batchSize)
+		if err != nil {
+			log.Errorf("action: read_batch | result: fail | client_id: %v | error: %v",
+				c.config.ID, err)
+			return
+		}
+
+		if len(batch) == 0 {
+			break
+		}
+
+		if err := SendBatch(c.conn, c.config.ID, batch); err != nil {
+			log.Errorf("action: send_batch | result: fail | client_id: %v | error: %v",
+				c.config.ID, err)
+			return
+		}
+
+		cantidad, success, err := RecvBatchAck(c.conn)
+		if err != nil {
+			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
+				c.config.ID, err)
+			return
+		}
+
+		if !success {
+			log.Errorf("action: apuesta_enviada | result: fail | client_id: %v | cantidad: %v",
+				c.config.ID, cantidad)
+			return
+		}
+
+		log.Infof("action: apuesta_enviada | result: success | client_id: %v | cantidad: %v",
+			c.config.ID, cantidad)
+
+		if done {
+			break
+		}
+	}
+
+	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+}
+
+func readBatch(reader *csv.Reader, maxSize int) ([]BetRecord, bool, error) {
+	var batch []BetRecord
+	for i := 0; i < maxSize; i++ {
+		row, err := reader.Read()
+		
+		if err == io.EOF {
+			return batch, true, nil
+		}
+
+		if err != nil {
+			return nil, false, err
+		}
+
+		if len(row) < 5 {
+			continue
+		}
+		batch = append(batch, BetRecord{
+			FirstName: row[0],
+			LastName:  row[1],
+			Document:  row[2],
+			Birthdate: row[3],
+			Number:    row[4],
+		})
+	}
+	return batch, false, nil
 }
 
 func (c *Client) handleShutdown() {

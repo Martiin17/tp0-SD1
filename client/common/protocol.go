@@ -4,14 +4,19 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
 const (
-	msgTypeBet = "BET"
-	msgTypeAck = "ACK"
-	separator  = "|"
-	headerSize = 4
+	msgTypeBet      = "BET"
+	msgTypeAck      = "ACK"
+	msgTypeBatch    = "BATCH"
+	msgTypeBatchOK  = "BATCH_OK"
+	msgTypeBatchErr = "BATCH_ERR"
+	separator       = "|"
+	recordSep       = "\n"
+	headerSize      = 4
 )
 
 func sendAll(conn net.Conn, data []byte) error {
@@ -43,7 +48,7 @@ func sendMessage(conn net.Conn, body string) error {
 	data := []byte(body)
 	header := make([]byte, headerSize)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
-
+	
 	if err := sendAll(conn, header); err != nil {
 		return err
 	}
@@ -78,4 +83,49 @@ func RecvAck(conn net.Conn) (document, number string, err error) {
 		return "", "", fmt.Errorf("unexpected message: %s", msg)
 	}
 	return parts[1], parts[2], nil
+}
+
+type BetRecord struct {
+	FirstName string
+	LastName  string
+	Document  string
+	Birthdate string
+	Number    string
+}
+
+func SendBatch(conn net.Conn, agency string, bets []BetRecord) error {
+	var sb strings.Builder
+	sb.WriteString(msgTypeBatch)
+	sb.WriteString(separator)
+	sb.WriteString(agency)
+	sb.WriteString(separator)
+	sb.WriteString(strconv.Itoa(len(bets)))
+	for _, b := range bets {
+		sb.WriteString(recordSep)
+		sb.WriteString(strings.Join([]string{b.FirstName, b.LastName, b.Document, b.Birthdate, b.Number}, separator))
+	}
+	return sendMessage(conn, sb.String())
+}
+
+func RecvBatchAck(conn net.Conn) (cantidad int, success bool, err error) {
+	msg, err := recvMessage(conn)
+	if err != nil {
+		return 0, false, err
+	}
+	parts := strings.Split(msg, separator)
+	if len(parts) != 2 {
+		return 0, false, fmt.Errorf("unexpected batch ack: %s", msg)
+	}
+	cantidad, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, false, fmt.Errorf("invalid cantidad in ack: %s", msg)
+	}
+	switch parts[0] {
+	case msgTypeBatchOK:
+		return cantidad, true, nil
+	case msgTypeBatchErr:
+		return cantidad, false, nil
+	default:
+		return 0, false, fmt.Errorf("unknown ack type: %s", parts[0])
+	}
 }

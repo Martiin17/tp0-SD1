@@ -33,7 +33,8 @@ def get_clients_config(n_clients):
                 'server'
                 ],
             'volumes': [
-                './client/config.yaml:/config.yaml:ro'
+                './client/config.yaml:/config.yaml:ro',
+                f'.data/agency-{i}.csv:/data/agency-{i}.csv:ro',
                 ]
         }
     return result

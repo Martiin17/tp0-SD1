@@ -58,6 +58,8 @@ func InitConfig() (*viper.Viper, error) {
 	v.BindEnv("nacimiento", "NACIMIENTO")
 	v.BindEnv("numero", "NUMERO")
 
+	v.BindEnv("batch.maxAmount", "CLI_BATCH_MAXAMOUNT")
+
 	v.SetConfigFile("./config.yaml")
 	if err := v.ReadInConfig(); err != nil {
 		fmt.Printf("Configuration could not be read from config file. Using env variables instead\n")
@@ -137,6 +139,8 @@ func main() {
 		ServerAddress: v.GetString("server.address"),
 		LoopPeriod:    loopPeriod,
 		Bet:           bet,
+		BatchMaxAmount: v.GetInt("batch.maxAmount"),
+		DataFilePath:   fmt.Sprintf("/data/agency-%s.csv", v.GetString("id")),
 	}
 
 	client := common.NewClient(clientConfig, sigs)
