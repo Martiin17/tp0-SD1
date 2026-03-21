@@ -60,6 +60,7 @@ func (c *Client) StartClientLoop() {
 			)
 
 			time.Sleep(c.config.LoopPeriod)
+			msgID-- 
 			continue
 		}
 
