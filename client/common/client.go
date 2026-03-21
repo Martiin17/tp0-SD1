@@ -69,7 +69,7 @@ func (c *Client) StartClientLoop() {
 			break
 		}
 
-		log.Errorf("action: connect | result: fail | client_id: %v | error: %v",
+		log.Infof("action: connect | result: fail | client_id: %v | error: %v",
 			c.config.ID, err)
 
 		select {
