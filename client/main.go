@@ -72,7 +72,7 @@ func InitConfig() (*viper.Viper, error) {
 	return v, nil
 }
 
-func readBetFromViper(v *viper.Viper) (common.BetData, error) {
+func readBetFromViper(v *viper.Viper) (common.BetData, bool) {
 	fields := map[string]string{
 		"nombre":    v.GetString("nombre"),
 		"apellido":  v.GetString("apellido"),
@@ -81,9 +81,9 @@ func readBetFromViper(v *viper.Viper) (common.BetData, error) {
 		"numero":    v.GetString("numero"),
 	}
 
-	for key, val := range fields {
+	for _, val := range fields {
 		if val == "" {
-			return common.BetData{}, fmt.Errorf("missing required env variable: %s", strings.ToUpper(key))
+			return common.BetData{}, false
 		}
 	}
 
@@ -93,19 +93,16 @@ func readBetFromViper(v *viper.Viper) (common.BetData, error) {
 		Document:  fields["documento"],
 		Birthdate: fields["nacimiento"],
 		Number:    fields["numero"],
-	}, nil
+	}, true
 }
 
-func PrintConfig(v *viper.Viper, bet common.BetData) {
+func PrintConfig(v *viper.Viper) {
 	log.Infof("action: config | result: success | client_id: %s | server_address: %s | "+
-		"nombre: %s | apellido: %s | documento: %s | nacimiento: %s | numero: %s",
+		"batch_max_amount: %d | log_level: %s",
 		v.GetString("id"),
 		v.GetString("server.address"),
-		bet.FirstName,
-		bet.LastName,
-		bet.Document,
-		bet.Birthdate,
-		bet.Number,
+		v.GetInt("batch.maxAmount"),
+		v.GetString("log.level"),
 	)
 }
 
@@ -121,18 +118,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	bet, err := readBetFromViper(v)
-	if err != nil {
-		log.Criticalf("action: read_bet_env | result: fail | error: %v", err)
-		os.Exit(1)
-	}
-
-	PrintConfig(v, bet)
+	PrintConfig(v)
 
 	loopPeriod, _ := time.ParseDuration(v.GetString("loop.period"))
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
+
+	bet, _ := readBetFromViper(v)
 
 	clientConfig := common.ClientConfig{
 		ID:            v.GetString("id"),
