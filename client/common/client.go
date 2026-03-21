@@ -55,7 +55,7 @@ func (c *Client) StartClientLoop() {
 		err := c.createClientSocket()
 		if err != nil {
 			log.Errorf(
-				"action: connect | result: retry | client_id: %v",
+				"action: connect | result: in_progress | client_id: %v",
 				c.config.ID,
 			)
 
