@@ -1,21 +1,22 @@
 import socket
+import select
 import logging
 import signal
-import os
+from typing import Optional
 
 from common.protocol import (
     recv_batch, send_batch_ack,
     send_winners,
     MSG_BATCH, MSG_DONE,
 )
-from common.utils import Bet, store_bets, load_bets, has_won, STORAGE_FILEPATH
+from common.utils import Bet, store_bets, load_bets, has_won
 
 TOTAL_AGENCIES = 5
+
 
 class Server:
     def __init__(self, port, listen_backlog):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_socket.bind(("", port))
         self._server_socket.listen(listen_backlog)
         self.running = True
@@ -27,72 +28,96 @@ class Server:
         self._server_socket.close()
 
     def run(self):
-
-        if os.path.exists(STORAGE_FILEPATH):
-            os.remove(STORAGE_FILEPATH)
-            logging.info("action: cleanup_storage | result: success")
-
+        """
+        Phase 1: accept all TOTAL_AGENCIES connections.
+        Phase 2: use select() to process one message at a time from each
+                 agency socket, without blocking on any single one.
+        Phase 3: run lottery and send winners once all agencies sent DONE.
+        """
         agency_sockets: dict[str, socket.socket] = {}
+        sock_to_agency: dict[socket.socket, Optional[str]] = {}
 
-        while self.running and len(agency_sockets) < TOTAL_AGENCIES:
+        pending_socks: list[socket.socket] = []
+        while self.running and len(pending_socks) < TOTAL_AGENCIES:
             try:
                 client_sock = self.__accept_new_connection()
                 if client_sock:
-                    self.__handle_bets(client_sock, agency_sockets)
-            except Exception as e:
+                    pending_socks.append(client_sock)
+                    sock_to_agency[client_sock] = None
+            except OSError:
                 if not self.running:
-                    break
-                logging.error(f"action: accept_connections | result: fail | error: {e}")
+                    logging.info("action: accept_connections | result: success | info: server_stopped")
+                else:
+                    logging.error("action: accept_connections | result: fail | error: unexpected_socket_error")
+                self.__shutdown()
+                return
 
-        if self.running and len(agency_sockets) == TOTAL_AGENCIES:
+        if len(pending_socks) < TOTAL_AGENCIES:
+            self.__shutdown()
+            return
+
+        done_agencies: set[str] = set()
+        active_socks = list(pending_socks)
+
+        while len(done_agencies) < TOTAL_AGENCIES and active_socks:
+            readable, _, _ = select.select(active_socks, [], [], 30.0)
+            if not readable:
+                logging.error("action: sorteo | result: fail | error: timeout waiting for agencies")
+                break
+
+            for sock in readable:
+                try:
+                    msg_type, agency, records = recv_batch(sock)
+                except OSError as e:
+                    logging.error(f"action: recv_batch | result: fail | error: {e}")
+                    active_socks.remove(sock)
+                    sock.close()
+                    continue
+
+                if sock_to_agency[sock] is None:
+                    sock_to_agency[sock] = agency
+                    agency_sockets[agency] = sock
+
+                if msg_type == MSG_DONE:
+                    logging.info(f"action: done_received | result: success | agency: {agency}")
+                    done_agencies.add(agency)
+                    active_socks.remove(sock)
+                    continue
+
+                cantidad = len(records)
+                try:
+                    bets = [
+                        Bet(agency, fn, ln, doc, birth, num)
+                        for fn, ln, doc, birth, num in records
+                    ]
+                    store_bets(bets)
+                    logging.info(
+                        f"action: apuesta_recibida | result: success | cantidad: {cantidad}"
+                    )
+                    send_batch_ack(sock, cantidad, success=True)
+                except Exception as e:
+                    logging.error(
+                        f"action: apuesta_recibida | result: fail | cantidad: {cantidad} | error: {e}"
+                    )
+                    send_batch_ack(sock, cantidad, success=False)
+
+        if len(done_agencies) == TOTAL_AGENCIES:
             self.__run_lottery(agency_sockets)
 
         self.__shutdown()
 
-    def __handle_bets(self, client_sock: socket.socket, agency_sockets: dict):
-        try:
-            while True:
-                msg_type, agency, records = recv_batch(client_sock)
-
-                if msg_type == MSG_DONE:
-                    logging.info(
-                        f"action: done_received | result: success | agency: {agency}"
-                    )
-
-                    agency_sockets[agency] = client_sock
-                    return
-
-                try:
-                    bets = []
-                    for fn, ln, doc, birth, num in records:
-                        bets.append(Bet(agency, fn, ln, doc, birth, num))
-                        logging.info(f"action: apuesta_almacenada | result: success | dni: {doc} | numero: {num}")
-                    
-                    store_bets(bets)
-                    send_batch_ack(client_sock, len(records), success=True)
-                except Exception as e:
-                    logging.error(f"action: apuesta_recibida | result: fail | error: {e}")
-                    send_batch_ack(client_sock, len(records), success=False)
-        except (OSError, ValueError) as e:
-            logging.error(f"action: handle_bets | result: fail | error: {e}")
-            client_sock.close()
-
-    def __run_lottery(self, agency_sockets: dict[str, socket.socket]):
+    def __run_lottery(self, agency_sockets: dict):
         logging.info("action: sorteo | result: success")
 
-        winners_by_agency: dict[str, list[str]] = {str(i): [] for i in range(1, TOTAL_AGENCIES + 1)}
-        
-        try:
-            for bet in load_bets():
-                if has_won(bet):
-                    winners_by_agency[str(bet.agency)].append(bet.document)
-        except Exception as e:
-            logging.error(f"action: load_bets | result: fail | error: {e}")
+        winners_by_agency: dict[str, list[str]] = {a: [] for a in agency_sockets}
+        for bet in load_bets():
+            key = str(bet.agency)
+            if has_won(bet) and key in winners_by_agency:
+                winners_by_agency[key].append(bet.document)
 
         for agency, sock in agency_sockets.items():
             try:
                 send_winners(sock, winners_by_agency.get(agency, []))
-                sock.shutdown(socket.SHUT_WR)
             except OSError as e:
                 logging.error(
                     f"action: send_winners | result: fail | agency: {agency} | error: {e}"
