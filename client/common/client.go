@@ -72,10 +72,8 @@ func (c *Client) StartClientLoop() {
 		if err == nil {
 			break
 		}
-
-		log.Errorf("action: connect | result: in_progress | client_id: %v | error: %v",
+		log.Infof("action: connect | result: in_progress | client_id: %v | error: %v",
 			c.config.ID, err)
-
 		select {
 		case <-time.After(c.config.LoopPeriod):
 		case <-c.stop:
@@ -83,7 +81,6 @@ func (c *Client) StartClientLoop() {
 			return
 		}
 	}
-
 	defer c.conn.Close()
 
 	file, err := os.Open(c.config.DataFilePath)
@@ -145,6 +142,22 @@ func (c *Client) StartClientLoop() {
 			break
 		}
 	}
+
+	if err := SendDone(c.conn, c.config.ID); err != nil {
+		log.Errorf("action: send_done | result: fail | client_id: %v | error: %v",
+			c.config.ID, err)
+		return
+	}
+
+	winners, err := RecvWinners(c.conn)
+	if err != nil {
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v",
+			c.config.ID, err)
+		return
+	}
+
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v",
+		len(winners))
 
 	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
 }

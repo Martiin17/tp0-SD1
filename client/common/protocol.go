@@ -17,6 +17,8 @@ const (
 	separator       = "|"
 	recordSep       = "\n"
 	headerSize      = 4
+	msgTypeDone    = "DONE"
+	msgTypeWinners = "WINNERS"
 )
 
 func sendAll(conn net.Conn, data []byte) error {
@@ -128,4 +130,34 @@ func RecvBatchAck(conn net.Conn) (cantidad int, success bool, err error) {
 	default:
 		return 0, false, fmt.Errorf("unknown ack type: %s", parts[0])
 	}
+}
+
+func SendDone(conn net.Conn, agency string) error {
+	return sendMessage(conn, strings.Join([]string{msgTypeDone, agency}, separator))
+}
+
+func RecvWinners(conn net.Conn) ([]string, error) {
+	msg, err := recvMessage(conn)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(msg, recordSep)
+	parts := strings.Split(lines[0], separator)
+	if len(parts) != 2 || parts[0] != msgTypeWinners {
+		return nil, fmt.Errorf("unexpected WINNERS message: %s", lines[0])
+	}
+	n, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid winner count: %s", parts[1])
+	}
+	var winners []string
+	for _, l := range lines[1:] {
+		if l != "" {
+			winners = append(winners, l)
+		}
+	}
+	if len(winners) != n {
+		return nil, fmt.Errorf("expected %d winners, got %d", n, len(winners))
+	}
+	return winners, nil
 }
