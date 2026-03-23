@@ -2,6 +2,7 @@ import socket
 import select
 import logging
 import signal
+import threading
 from typing import Optional
 
 from common.protocol import (
@@ -18,6 +19,9 @@ class Server:
         self._server_socket.listen(listen_backlog)
         self.running = True
         self._total_agencies = total_agencies
+        self._store_lock = threading.Lock()
+        self._lottery_barrier = threading.Barrier(total_agencies)
+        self._winners: dict[str, list[str]] = {}
         signal.signal(signal.SIGTERM, self.__handle_signal)
 
     def __handle_signal(self, signum, frame):
@@ -26,61 +30,42 @@ class Server:
         self._server_socket.close()
 
     def run(self):
-        """
-        Phase 1: accept all TOTAL_AGENCIES connections.
-        Phase 2: use select() to process one message at a time from each
-                 agency socket, without blocking on any single one.
-        Phase 3: run lottery and send winners once all agencies sent DONE.
-        """
-        agency_sockets: dict[str, socket.socket] = {}
-        sock_to_agency: dict[socket.socket, Optional[str]] = {}
+        threads = []
 
-        pending_socks: list[socket.socket] = []
-        while self.running and len(pending_socks) < self._total_agencies:
+        while self.running and len(threads) < self._total_agencies:
             try:
                 client_sock = self.__accept_new_connection()
                 if client_sock:
-                    pending_socks.append(client_sock)
-                    sock_to_agency[client_sock] = None
+                    t = threading.Thread(
+                        target=self.__handle_agency,
+                        args=(client_sock,),
+                        daemon=True,
+                    )
+                    t.start()
+                    threads.append(t)
             except OSError:
                 if not self.running:
                     logging.info("action: accept_connections | result: success | info: server_stopped")
                 else:
                     logging.error("action: accept_connections | result: fail | error: unexpected_socket_error")
-                self.__shutdown()
-                return
-
-        if len(pending_socks) < self._total_agencies:
-            self.__shutdown()
-            return
-
-        done_agencies: set[str] = set()
-        active_socks = list(pending_socks)
-
-        while len(done_agencies) < self._total_agencies and active_socks:
-            readable, _, _ = select.select(active_socks, [], [], 30.0)
-            if not readable:
-                logging.error("action: sorteo | result: fail | error: timeout waiting for agencies")
                 break
 
-            for sock in readable:
-                try:
-                    msg_type, agency, records = recv_batch(sock)
-                except OSError as e:
-                    logging.error(f"action: recv_batch | result: fail | error: {e}")
-                    active_socks.remove(sock)
-                    sock.close()
-                    continue
+        for t in threads:
+            t.join()
 
-                if sock_to_agency[sock] is None:
-                    sock_to_agency[sock] = agency
-                    agency_sockets[agency] = sock
+        self.__shutdown()
+
+    def __handle_agency(self, client_sock: socket.socket):
+        agency: Optional[str] = None
+        try:
+            while True:
+                msg_type, agency, records = recv_batch(client_sock)
 
                 if msg_type == MSG_DONE:
-                    logging.info(f"action: done_received | result: success | agency: {agency}")
-                    done_agencies.add(agency)
-                    active_socks.remove(sock)
-                    continue
+                    logging.info(
+                        f"action: done_received | result: success | agency: {agency}"
+                    )
+                    break
 
                 cantidad = len(records)
                 try:
@@ -88,40 +73,41 @@ class Server:
                         Bet(agency, fn, ln, doc, birth, num)
                         for fn, ln, doc, birth, num in records
                     ]
-                    store_bets(bets)
+                    with self._store_lock:
+                        store_bets(bets)
                     logging.info(
                         f"action: apuesta_recibida | result: success | cantidad: {cantidad}"
                     )
-                    send_batch_ack(sock, cantidad, success=True)
+                    send_batch_ack(client_sock, cantidad, success=True)
                 except Exception as e:
                     logging.error(
                         f"action: apuesta_recibida | result: fail | cantidad: {cantidad} | error: {e}"
                     )
-                    send_batch_ack(sock, cantidad, success=False)
+                    send_batch_ack(client_sock, cantidad, success=False)
 
-        if len(done_agencies) == self._total_agencies:
-            self.__run_lottery(agency_sockets)
+            arrival_index = self._lottery_barrier.wait()
 
-        self.__shutdown()
+            if arrival_index == 0:
+                self.__run_lottery()
+            self._lottery_barrier.wait()
+            winners = self._winners.get(agency, [])
+            send_winners(client_sock, winners)
 
-    def __run_lottery(self, agency_sockets: dict):
+        except OSError as e:
+            logging.error(
+                f"action: handle_agency | result: fail | agency: {agency} | error: {e}"
+            )
+        finally:
+            client_sock.close()
+
+    def __run_lottery(self):
         logging.info("action: sorteo | result: success")
-
-        winners_by_agency: dict[str, list[str]] = {a: [] for a in agency_sockets}
+        winners: dict[str, list[str]] = {}
         for bet in load_bets():
             key = str(bet.agency)
-            if has_won(bet) and key in winners_by_agency:
-                winners_by_agency[key].append(bet.document)
-
-        for agency, sock in agency_sockets.items():
-            try:
-                send_winners(sock, winners_by_agency.get(agency, []))
-            except OSError as e:
-                logging.error(
-                    f"action: send_winners | result: fail | agency: {agency} | error: {e}"
-                )
-            finally:
-                sock.close()
+            if has_won(bet):
+                winners.setdefault(key, []).append(bet.document)
+        self._winners = winners
 
     def __shutdown(self):
         logging.info("action: shutdown | result: in_progress | resource: server_socket")
@@ -137,7 +123,9 @@ class Server:
         logging.info("action: accept_connections | result: in_progress")
         try:
             client_sock, addr = self._server_socket.accept()
-            logging.info(f"action: accept_connections | result: success | ip: {addr[0]}")
+            logging.info(
+                f"action: accept_connections | result: success | ip: {addr[0]}"
+            )
             return client_sock
         except OSError:
             return None
