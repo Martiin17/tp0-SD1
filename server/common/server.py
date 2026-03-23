@@ -11,15 +11,13 @@ from common.protocol import (
 )
 from common.utils import Bet, store_bets, load_bets, has_won
 
-TOTAL_AGENCIES = 5
-
-
 class Server:
-    def __init__(self, port, listen_backlog):
+    def __init__(self, port, listen_backlog, total_agencies=5):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(("", port))
         self._server_socket.listen(listen_backlog)
         self.running = True
+        self._total_agencies = total_agencies
         signal.signal(signal.SIGTERM, self.__handle_signal)
 
     def __handle_signal(self, signum, frame):
@@ -38,7 +36,7 @@ class Server:
         sock_to_agency: dict[socket.socket, Optional[str]] = {}
 
         pending_socks: list[socket.socket] = []
-        while self.running and len(pending_socks) < TOTAL_AGENCIES:
+        while self.running and len(pending_socks) < self._total_agencies:
             try:
                 client_sock = self.__accept_new_connection()
                 if client_sock:
@@ -52,14 +50,14 @@ class Server:
                 self.__shutdown()
                 return
 
-        if len(pending_socks) < TOTAL_AGENCIES:
+        if len(pending_socks) < self._total_agencies:
             self.__shutdown()
             return
 
         done_agencies: set[str] = set()
         active_socks = list(pending_socks)
 
-        while len(done_agencies) < TOTAL_AGENCIES and active_socks:
+        while len(done_agencies) < self._total_agencies and active_socks:
             readable, _, _ = select.select(active_socks, [], [], 30.0)
             if not readable:
                 logging.error("action: sorteo | result: fail | error: timeout waiting for agencies")
@@ -101,7 +99,7 @@ class Server:
                     )
                     send_batch_ack(sock, cantidad, success=False)
 
-        if len(done_agencies) == TOTAL_AGENCIES:
+        if len(done_agencies) == self._total_agencies:
             self.__run_lottery(agency_sockets)
 
         self.__shutdown()

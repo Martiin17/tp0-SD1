@@ -31,7 +31,8 @@ def generate_yaml(output_file, n_clients):
         'image': 'server:latest',
         'entrypoint': 'python3 /main.py',
         'environment': [
-            'PYTHONUNBUFFERED=1'
+            'PYTHONUNBUFFERED=1',
+            f'TOTAL_AGENCIES={n_clients}',
             ],
         'networks': [
             'testing_net'
