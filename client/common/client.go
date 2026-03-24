@@ -25,7 +25,6 @@ type ClientConfig struct {
 	ID            string
 	ServerAddress string
 	LoopPeriod    time.Duration
-	Bet           BetData  
 	BatchMaxAmount int
 	DataFilePath  string
 }
@@ -73,7 +72,7 @@ func (c *Client) StartClientLoop() {
 			break
 		}
 
-		log.Errorf("action: connect | result: in_progress | client_id: %v | error: %v",
+		log.Infof("action: connect | result: in_progress | client_id: %v | error: %v",
 			c.config.ID, err)
 
 		select {
