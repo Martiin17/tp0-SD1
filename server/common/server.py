@@ -23,15 +23,14 @@ class Server:
         while self.running:
             try:
                 client_sock = self.__accept_new_connection()
-                if client_sock:
-                    self.__handle_client_connection(client_sock)
+                if client_sock is None:
+                    continue
+                self.__handle_client_connection(client_sock)
             except OSError:
                 if not self.running:
-                    logging.info("action: accept_connections | result: success")
-                else:
-                    logging.error("action: accept_connections | result: fail | error: unexpected_socket_error")
+                    break
+                logging.error("action: accept_connections | result: fail | error: unexpected_socket_error")
                 break
-
         self.__shutdown()
 
     def __shutdown(self):
@@ -47,9 +46,12 @@ class Server:
             return None
         logging.info("action: accept_connections | result: in_progress")
         try:
+            self._server_socket.settimeout(1.0)
             client_sock, addr = self._server_socket.accept()
             logging.info(f"action: accept_connections | result: success | ip: {addr[0]}")
             return client_sock
+        except socket.timeout:
+            return None
         except OSError:
             return None
 
