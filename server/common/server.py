@@ -5,53 +5,54 @@ import signal
 
 class Server:
     def __init__(self, port, listen_backlog):
-        # Initialize server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
-        signal.signal(signal.SIGTERM, self.__handle_signal)
         self.running = True
+        self._client_sock = None
+        signal.signal(signal.SIGTERM, self.__handle_signal)
 
     def __handle_signal(self, signum, frame):
         logging.info(f'action: signal_received | result: success | signal: {signum}')
         self.running = False
-        self._server_socket.close()
+        if self._client_sock:
+            try:
+                self._client_sock.close()
+            except:
+                pass
+        try:
+            self._server_socket.close()
+        except:
+            pass
 
     def run(self):
-        """
-        Dummy Server loop
-
-        Server that accept a new connections and establishes a
-        communication with a client. After client with communucation
-        finishes, servers starts to accept new connections again
-        """
-
         while self.running:
             try:
                 client_sock = self.__accept_new_connection()
-                if client_sock:
-                    self.__handle_client_connection(client_sock)
+                if client_sock is None:
+                    break
+                self._client_sock = client_sock
+                self.__handle_client_connection(client_sock)
+                self._client_sock = None
             except OSError:
                 if not self.running:
-                    logging.info('action: accept_connections | result: success')
-                else:
-                    logging.error('action: accept_connections | result: fail | error: socket_closed')
+                    break
+                logging.error('action: accept_connections | result: fail | error: socket_closed')
                 break
 
         self.__shutdown()
 
     def __shutdown(self):
-        """Cierre graceful de recursos con logs específicos"""
         logging.info('action: shutdown | result: in_progress | resource: server_socket')
         try:
             self._server_socket.close()
         except:
             pass
-            
         logging.info('action: shutdown | result: success')
-    
+
     def __accept_new_connection(self):
-        if not self.running: 
+        if not self.running:
             return None
         try:
             c, addr = self._server_socket.accept()
@@ -67,9 +68,14 @@ class Server:
             logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
             self.__send_all(client_sock, f"{msg}\n".encode('utf-8'))
         except OSError as e:
-            logging.error(f"action: receive_message | result: fail | error: {e}")
+            if self.running:
+                logging.error(f"action: receive_message | result: fail | error: {e}")
         finally:
-            client_sock.close()
+            try:
+                client_sock.close()
+                logging.info('action: client_connection | result: closed')
+            except:
+                pass
 
     def __recv_line(self, sock: socket.socket) -> str:
         buf = b""
