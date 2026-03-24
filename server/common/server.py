@@ -61,34 +61,29 @@ class Server:
             return None
 
     def __handle_client_connection(self, client_sock):
-        """
-        Read message from a specific client socket and closes the socket
-
-        If a problem arises in the communication with the client, the
-        client socket will also be closed
-        """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
+            msg = self.__recv_line(client_sock)
             addr = client_sock.getpeername()
             logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            # TODO: Modify the send to avoid short-writes
-            client_sock.send("{}\n".format(msg).encode('utf-8'))
+            self.__send_all(client_sock, f"{msg}\n".encode('utf-8'))
         except OSError as e:
-            logging.error("action: receive_message | result: fail | error: {e}")
+            logging.error(f"action: receive_message | result: fail | error: {e}")
         finally:
             client_sock.close()
 
-    def __accept_new_connection(self):
-        """
-        Accept new connections
+    def __recv_line(self, sock: socket.socket) -> str:
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = sock.recv(1)
+            if not chunk:
+                raise OSError("Connection closed while reading")
+            buf += chunk
+        return buf.rstrip().decode('utf-8')
 
-        Function blocks until a connection to a client is made.
-        Then connection created is printed and returned
-        """
-
-        # Connection arrived
-        logging.info('action: accept_connections | result: in_progress')
-        c, addr = self._server_socket.accept()
-        logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
-        return c
+    def __send_all(self, sock: socket.socket, data: bytes) -> None:
+        sent = 0
+        while sent < len(data):
+            n = sock.send(data[sent:])
+            if n == 0:
+                raise OSError("Connection closed while sending")
+            sent += n
