@@ -12,20 +12,11 @@ import (
 
 var log = logging.MustGetLogger("log")
 
-type BetData struct {
-	FirstName string
-	LastName  string
-	Document  string
-	Birthdate string
-	Number    string
-}
-
 // ClientConfig Configuration used by the client
 type ClientConfig struct {
 	ID            string
 	ServerAddress string
 	LoopPeriod    time.Duration
-	Bet           BetData  
 	BatchMaxAmount int
 	DataFilePath  string
 }
@@ -166,15 +157,12 @@ func readBatch(reader *csv.Reader, maxSize int) ([]BetRecord, bool, error) {
 	var batch []BetRecord
 	for i := 0; i < maxSize; i++ {
 		row, err := reader.Read()
-		
 		if err == io.EOF {
 			return batch, true, nil
 		}
-
 		if err != nil {
 			return nil, false, err
 		}
-
 		if len(row) < 5 {
 			continue
 		}
