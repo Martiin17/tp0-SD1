@@ -179,3 +179,238 @@ Se proveen [pruebas automáticas](https://github.com/7574-sistemas-distribuidos/
 
 El incumplimiento de las pruebas es condición de desaprobación, pero su cumplimiento no es suficiente para la aprobación.  Se pide a los alumnos leer atentamente y **tener en cuenta** los criterios de corrección informados  [en el campus](https://campusgrado.fi.uba.ar/mod/page/view.php?id=73393).
 Respetar el formato y contenido las entradas de logs descritas en los ejercicios, pues son las que se chequean en cada uno de los tests.
+
+
+# Solución propuesta
+
+## Ejecución
+
+Todos los ejercicios se ejecutan desde la raíz del proyecto. El script `script_ej1.py` genera el `docker-compose.yaml` con la cantidad N de clientes deseada.
+
+### Generar el docker-compose
+```bash
+python3 script_ej1.py docker-compose.yaml <n_clients>
+```
+
+### Construir las imágenes
+```bash
+make docker-image
+```
+
+### Levantar el sistema
+```bash
+make docker-compose-up
+```
+
+### Ver los logs
+```bash
+make docker-compose-logs
+```
+
+### Bajar el sistema
+```bash
+make docker-compose-down
+```
+
+---
+
+### Ejercicios 1, 2 y 3 
+
+```bash
+python3 script_ej1.py docker-compose.yaml <n_clients>
+make docker-compose-up
+```
+
+---
+
+### Ejercicio 4 — Graceful shutdown
+
+El sistema responde correctamente a `SIGTERM`. Al ejecutar `make docker-compose-down`, Docker envía `SIGTERM` a cada contenedor y ambos cierran sus recursos ordenadamente antes de terminar.
+
+```bash
+python3 script_ej1.py docker-compose.yaml <n_clients>
+make docker-compose-up
+# En otra terminal:
+make docker-compose-down
+```
+
+---
+
+### Ejercicio 5 — Envío de una apuesta
+
+Cada cliente envía una única apuesta definida por variables de entorno. Ejemplo:
+
+| Variable | Descripción | Ejemplo |
+|---|---|---|
+| `NOMBRE` | Nombre del apostador | `Santiago Lionel` |
+| `APELLIDO` | Apellido del apostador | `Lorca` |
+| `DOCUMENTO` | DNI | `30904465` |
+| `NACIMIENTO` | Fecha de nacimiento | `1999-03-17` |
+| `NUMERO` | Número apostado | `7574` |
+
+```bash
+python3 script_ej1.py docker-compose.yaml <n_clients>
+make docker-compose-up
+```
+
+---
+
+### Ejercicios 6, 7 y 8 — Envío por batches, sorteo y paralelismo
+
+Requieren que los archivos de apuestas estén disponibles en `.data/`:
+
+```bash
+cd .data && unzip datasets.zip && cd ..
+```
+
+Luego:
+
+```bash
+python3 script_ej1.py docker-compose.yaml <n_clients>
+make docker-compose-up
+```
+
+La cantidad máxima de apuestas por batch se configura en `client/config.yaml`:
+
+```yaml
+batch:
+  maxAmount: 10
+```
+
+También puede sobreescribirse con la variable de entorno `CLI_BATCH_MAXAMOUNT`.
+
+---
+
+## Protocolo de comunicación (Parte 2)
+
+El protocolo implementado opera sobre TCP y es binario con framing por longitud. Todos los mensajes siguen el mismo formato:
+
+```
+[ 4 bytes: longitud del body (big-endian uint32) ][ body UTF-8 ]
+```
+
+El body es texto plano con campos separados por `|` y registros separados por `\n`.
+
+### Tipos de mensaje
+
+#### `BET` — Apuesta individual (ejercicio 5)
+
+Enviado por el cliente al servidor para registrar una única apuesta.
+```
+BET|<agency>|<first_name>|<last_name>|<document>|<birthdate>|<number>
+```
+
+Ejemplo:
+```
+BET|1|Santiago Lionel|Lorca|30904465|1999-03-17|7574
+```
+
+#### `ACK` — Confirmación de apuesta individual
+
+Enviado por el servidor como respuesta a un `BET`.
+
+```
+ACK|<document>|<number>
+```
+
+#### `BATCH` — Lote de apuestas (ejercicios 6, 7 y 8)
+
+Enviado por el cliente con múltiples apuestas. La primera línea es el header y las siguientes son los registros:
+```
+BATCH|<agency>|<n_bets>
+<first_name>|<last_name>|<document>|<birthdate>|<number>
+<first_name>|<last_name>|<document>|<birthdate>|<number>
+...
+```
+
+El tamaño máximo del paquete completo (header de 4 bytes + body) es de **8 KB**. Con el valor por defecto de `batch.maxAmount: 10` y un tamaño estimado de ~100 bytes por apuesta, cada batch ocupa aproximadamente 1 KB, con amplio margen de seguridad.
+
+#### `BATCH_OK` / `BATCH_ERR` — Confirmación de batch
+
+Enviado por el servidor como respuesta a un `BATCH`.
+
+```
+BATCH_OK|<cantidad>
+BATCH_ERR|<cantidad>
+```
+
+#### `DONE` — Fin de apuestas (ejercicios 7 y 8)
+
+Enviado por el cliente cuando termina de enviar todos sus batches, notificando al servidor que puede proceder con el sorteo una vez que todas las agencias lo hayan enviado.
+
+```
+DONE|<agency>
+```
+
+#### `WINNERS` — Ganadores del sorteo
+
+Enviado por el servidor a cada agencia con los DNIs ganadores correspondientes a esa agencia.
+
+```
+WINNERS|<n_winners>
+<document>
+<document>
+...
+```
+
+### Manejo de short-read y short-write
+
+Tanto el cliente (Go) como el servidor (Python) implementan funciones de envío y recepción que garantizan que se transmitan exactamente los bytes indicados:
+
+- **Go** (`protocol.go`): `sendAll` y `recvAll` iteran sobre `conn.Write` y `conn.Read` hasta completar la transferencia.
+- **Python** (`protocol.py`): `_send_all` y `_recv_all` iteran sobre `sock.send` y `sock.recv` de forma equivalente.
+
+---
+
+## Mecanismos de sincronización (Parte 3)
+
+### Ejercicio 7 — `select()` para I/O multiplexing
+
+En el ejercicio 7 el servidor utiliza `select.select()` para atender a múltiples agencias con un único thread, sin bloquearse en ninguna conexión en particular. El flujo es:
+
+1. **Fase 1**: Se aceptan exactamente `TOTAL_AGENCIES` conexiones de forma secuencial.
+2. **Fase 2**: Se usa `select()` con un timeout de 30 segundos sobre el conjunto de sockets activos. Por cada socket listo para leer se procesa un mensaje (`BATCH` o `DONE`).
+3. **Fase 3**: Cuando todas las agencias enviaron `DONE`, se ejecuta el sorteo y se envían los ganadores.
+
+### Ejercicio 8 — Multithreading con `Lock` y `Barrier`
+
+En el ejercicio 8 el servidor lanza un thread por agencia. Los mecanismos de sincronización utilizados son:
+
+#### `threading.Lock` — protección de `store_bets`
+
+La función `store_bets()` escribe en disco y no es thread-safe. Se protege con un `Lock` para evitar condiciones de carrera entre threads que persisten apuestas concurrentemente:
+
+```python
+with self._store_lock:
+    store_bets(bets)
+```
+
+#### `threading.Barrier` — sincronización para el sorteo
+
+El sorteo solo puede ejecutarse cuando **todas** las agencias terminaron de enviar sus apuestas. Se usa una `Barrier` con cuenta igual a `total_agencies`:
+
+1. Cada thread, al recibir `DONE` de su agencia, llama a `barrier.wait()`.
+2. El thread que llega último (índice 0) ejecuta `__run_lottery()`.
+3. Un segundo `barrier.wait()` asegura que todos los threads esperen a que los ganadores estén calculados antes de leerlos.
+
+```python
+arrival_index = self._lottery_barrier.wait()
+if arrival_index == 0:
+    self.__run_lottery()
+self._lottery_barrier.wait()  # esperar a que los ganadores estén disponibles
+winners = self._winners.get(agency, [])
+```
+
+#### `threading.Lock` — protección de `self._winners`
+
+La escritura de `self._winners` en `__run_lottery` y su lectura posterior en cada thread están protegidas por un lock dedicado (`_winners_lock`), evitando lecturas parciales aunque en la práctica el ordering del barrier lo garantice:
+
+```python
+# escritura (thread ganador del barrier)
+with self._winners_lock:
+    self._winners = winners
+
+# lectura (todos los threads tras el segundo wait)
+with self._winners_lock:
+    winners = self._winners.get(agency, [])
+```
