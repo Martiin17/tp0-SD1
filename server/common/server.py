@@ -55,6 +55,7 @@ class Server:
         if not self.running:
             return None
         try:
+            logging.info('action: accept_connections | result: in_progress')
             self._server_socket.settimeout(1.0)
             c, addr = self._server_socket.accept()
             logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
