@@ -31,7 +31,7 @@ class Server:
             try:
                 client_sock = self.__accept_new_connection()
                 if client_sock is None:
-                    break
+                    continue
                 self._client_sock = client_sock
                 self.__handle_client_connection(client_sock)
                 self._client_sock = None
@@ -55,9 +55,12 @@ class Server:
         if not self.running:
             return None
         try:
+            self._server_socket.settimeout(1.0)
             c, addr = self._server_socket.accept()
             logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
             return c
+        except socket.timeout:
+            return None
         except OSError:
             return None
 
@@ -71,11 +74,7 @@ class Server:
             if self.running:
                 logging.error(f"action: receive_message | result: fail | error: {e}")
         finally:
-            try:
-                client_sock.close()
-                logging.info('action: client_connection | result: closed')
-            except:
-                pass
+            client_sock.close()
 
     def __recv_line(self, sock: socket.socket) -> str:
         buf = b""
