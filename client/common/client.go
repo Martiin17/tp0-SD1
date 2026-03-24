@@ -25,6 +25,7 @@ type ClientConfig struct {
 	ID            string
 	ServerAddress string
 	LoopPeriod    time.Duration
+	Bet           BetData 
 	BatchMaxAmount int
 	DataFilePath  string
 }
