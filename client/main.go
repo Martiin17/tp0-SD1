@@ -42,22 +42,13 @@ func InitLogger(logLevel string) error {
 // an error is returned
 func InitConfig() (*viper.Viper, error) {
 	v := viper.New()
-
 	v.AutomaticEnv()
 	v.SetEnvPrefix("cli")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
 	v.BindEnv("id")
 	v.BindEnv("server.address")
 	v.BindEnv("loop.period")
 	v.BindEnv("log.level")
-
-	v.BindEnv("nombre", "NOMBRE")
-	v.BindEnv("apellido", "APELLIDO")
-	v.BindEnv("documento", "DOCUMENTO")
-	v.BindEnv("nacimiento", "NACIMIENTO")
-	v.BindEnv("numero", "NUMERO")
-
 	v.BindEnv("batch.maxAmount", "CLI_BATCH_MAXAMOUNT")
 
 	v.SetConfigFile("./config.yaml")
@@ -68,37 +59,11 @@ func InitConfig() (*viper.Viper, error) {
 	if _, err := time.ParseDuration(v.GetString("loop.period")); err != nil {
 		return nil, errors.Wrapf(err, "Could not parse CLI_LOOP_PERIOD env var as time.Duration.")
 	}
-
 	return v, nil
 }
 
-func readBetFromViper(v *viper.Viper) (common.BetData, bool) {
-	fields := map[string]string{
-		"nombre":    v.GetString("nombre"),
-		"apellido":  v.GetString("apellido"),
-		"documento": v.GetString("documento"),
-		"nacimiento": v.GetString("nacimiento"),
-		"numero":    v.GetString("numero"),
-	}
-
-	for _, val := range fields {
-		if val == "" {
-			return common.BetData{}, false
-		}
-	}
-
-	return common.BetData{
-		FirstName: fields["nombre"],
-		LastName:  fields["apellido"],
-		Document:  fields["documento"],
-		Birthdate: fields["nacimiento"],
-		Number:    fields["numero"],
-	}, true
-}
-
 func PrintConfig(v *viper.Viper) {
-	log.Infof("action: config | result: success | client_id: %s | server_address: %s | "+
-		"batch_max_amount: %d | log_level: %s",
+	log.Infof("action: config | result: success | client_id: %s | server_address: %s | batch_max_amount: %d | log_level: %s",
 		v.GetString("id"),
 		v.GetString("server.address"),
 		v.GetInt("batch.maxAmount"),
@@ -125,13 +90,10 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
 
-	bet, _ := readBetFromViper(v)
-
 	clientConfig := common.ClientConfig{
 		ID:            v.GetString("id"),
 		ServerAddress: v.GetString("server.address"),
 		LoopPeriod:    loopPeriod,
-		Bet:           bet,
 		BatchMaxAmount: v.GetInt("batch.maxAmount"),
 		DataFilePath:   fmt.Sprintf("/data/agency-%s.csv", v.GetString("id")),
 	}
