@@ -187,6 +187,8 @@ Respetar el formato y contenido las entradas de logs descritas en los ejercicios
 
 Todos los ejercicios se ejecutan desde la raíz del proyecto. El script `script_ej1.py` genera el `docker-compose.yaml` con la cantidad N de clientes deseada.
 
+Se requiere tener la libreria *PyYaml* instalada para correr el proyecto (la misma fue aprobada en el foro de consultas).
+
 ### Generar el docker-compose
 ```bash
 python3 script_ej1.py docker-compose.yaml <n_clients>
@@ -277,8 +279,6 @@ batch:
   maxAmount: 10
 ```
 
-También puede sobreescribirse con la variable de entorno `CLI_BATCH_MAXAMOUNT`.
-
 ---
 
 ## Protocolo de comunicación (Parte 2)
@@ -296,6 +296,7 @@ El body es texto plano con campos separados por `|` y registros separados por `\
 #### `BET` — Apuesta individual (ejercicio 5)
 
 Enviado por el cliente al servidor para registrar una única apuesta.
+
 ```
 BET|<agency>|<first_name>|<last_name>|<document>|<birthdate>|<number>
 ```
@@ -316,6 +317,7 @@ ACK|<document>|<number>
 #### `BATCH` — Lote de apuestas (ejercicios 6, 7 y 8)
 
 Enviado por el cliente con múltiples apuestas. La primera línea es el header y las siguientes son los registros:
+
 ```
 BATCH|<agency>|<n_bets>
 <first_name>|<last_name>|<document>|<birthdate>|<number>
